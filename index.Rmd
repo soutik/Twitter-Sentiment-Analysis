@@ -1,0 +1,130 @@
+---
+title: "Twitter Sentiment Analysis"
+author: "Soutik Chakraborty"
+date: "22 October 2015"
+output: html_document
+---
+
+This project is to create a "Sentiment Analysis" on a particular word or phrase from twitter. We use the twitteR package to create a search in twitter and get latest tweets containing that word. Once the tweets are cleaned we do a sentiment analysis to find where each tweet falls on an emotional level. 
+
+```{r, message = FALSE}
+#install.packages("/Users/soutik/Documents/R Scripts/Twitter Sentiment Analysis/R Packages/Rstem_0.4-1.tar", repos = NULL,type = "source")
+#install.packages("/Users/soutik/Documents/R Scripts/Twitter Sentiment Analysis/R Packages/sentiment_0.1.tar", repos = NULL ,type = "source")
+
+library(twitteR)
+library(ggplot2)
+library(tm)
+library(wordcloud)
+library(plyr)
+library(httr)
+library(base64enc)
+library(sentiment)
+library(Rstem)
+
+set.seed(100)
+```
+
+We use Twitter API to connect and authorize our program using OAuth. **Please use your own credentials when using the code** (Code of this part is purposely hidden for privacy purpose)
+
+```{r, echo = FALSE}
+#Authorize Twitter and connect to you API
+  
+oauth_endpoints("twitter")
+api_key <- "osdTYaJEmXwtClqwUrUco0Zf5"
+api_secret <- "ZApidXBXMSYwQScw3UJ2rtiIr37Xvj7qV9tadQ3MpbvsD8JpbD"
+access_token <- "70619699-5go3BPxkGt7Pskx6ya4yEM2lCAk947STrHilUiVyT"
+access_token_secret <- "QzN2fRDENrSINUYKE3J49eVie0ApCnY314riHR3NKoPuO"
+setup_twitter_oauth(api_key, api_secret, access_token, access_token_secret)
+```
+
+We pull tweets off from using a phrase. We use iPhone 6s as the phrase to search twitter for the last 2000 tweets in the language Englih. We then only get the text as that is of most importance to us in a Sentiment Analysis problem.
+
+```{r}
+
+#Pull tweets from Twitter Feed
+tweets <- searchTwitter("iPhone 6s", n = 2000, lang = "en")
+
+#Get only the Tweet from the entire Twitter data pulled
+tweet.txt <- sapply(tweets, function(x) x$getText())
+```
+
+We then have to clean the tweets from all the #tags, @, RTs etc that are rampant in the tweeting world as they hardly contribute towards sentiments. We also remove other aspects such as people, punctuations, numbers, HTML links and unnecessary spaces. This helps us get a text corpora which can be directly used for analysis.
+
+```{r}
+#Clean the tweet text
+
+# remove retweet entities
+tweet.txt = gsub("(RT|via)((?:\\b\\W*@\\w+)+)","", tweet.txt)
+# remove at people
+tweet.txt = gsub("@\\w+", "", tweet.txt)
+# remove punctuation
+tweet.txt = gsub("[[:punct:]]", "",tweet.txt)
+# remove numbers
+tweet.txt = gsub("[[:digit:]]", "", tweet.txt)
+# remove html links
+tweet.txt = gsub("http\\w+", "", tweet.txt)
+# remove unnecessary spaces
+tweet.txt = gsub("[ \t]{2,}", "", tweet.txt)
+tweet.txt = gsub("^\\s+|\\s+$", "", tweet.txt)
+
+# define "tolower error handling" function 
+try.error = function(x)
+{
+  # create missing value
+  y = NA
+  # tryCatch error
+  try_error = tryCatch(tolower(x), error=function(e) e)
+  # if not an error
+  if (!inherits(try_error, "error"))
+    y = tolower(x)
+  # result
+  return(y)
+}
+# lower case using try.error with sapply 
+tweet.txt = sapply(tweet.txt, try.error)
+
+# remove NAs in tweet.txt
+tweet.txt = tweet.txt[!is.na(tweet.txt)]
+names(tweet.txt) = NULL
+```
+
+We use Sentiment Package of create a sentiment analysis based on Bayes theorem. We assign each tweet a score of how the words in those tweets affect the tone of the tweet. Finally the function also provides a "Best Fit" stating the most appropriate fit of emotion attached to the tweet. We try to analyse how those emotions using a frequency plot of each of them.
+
+```{r}
+#Sentiment Analysis using 'Sentiment' Package of R
+tweet.emo <- classify_emotion(tweet.txt, algorithm = "bayes", prior = 1)
+
+#Making NA values in emotion as "neutral"
+tweet.emo[,7][is.na(tweet.emo[,7])] <- "neutral"
+
+tweet.emo.df <- data.frame(cbind(tweet.txt, tweet.emo))
+
+frequency <- xtabs(~tweet.emo.df$BEST_FIT)
+frequency <- frequency[c("anger", "disgust", "fear", "joy", "sadness", "surrise")]
+barplot(frequency, xlab = "Emotion", main = "Twitter Emotional Analysis")
+```
+
+
+To create a WordCloud we use Text Mining package "tm" and "WordCloud" package in R. We first read the tweets into a volatile corpora and then clean those tweets off the most common English language words like "if", "then", "the" etc.
+
+
+```{r}
+#Creating a corpora of the all tweets that have been pulled
+
+words <- Corpus(DataframeSource(data.frame(tweet.emo.df[,1])))
+
+#Cleaning the Corpora
+words <- tm_map(words, stripWhitespace) # Remove whitespaces
+words <- tm_map(words, removeWords, stopwords("english")) #Remove common english words
+wordsDTM = TermDocumentMatrix(words) #Creating a document matrix for creating WordCloud
+ 
+m = as.matrix(wordsDTM) #Creating matrix
+v = sort(rowSums(m), decreasing = TRUE) #Sort based on the frequency of the words
+d <- data.frame(word = names(v),freq=v) # creating a data frame of the words and their frequency
+
+pal <- brewer.pal(9, "Dark2") #color selection from color Brewer in R
+pal <- pal[-(1:2)]
+
+wordcloud(d$word,d$freq, scale=c(5,.3),min.freq=1,max.words=100, random.order=T, rot.per=.15, colors=pal, vfont=c("sans serif","plain")) #Creating the WordCloud
+
+```
